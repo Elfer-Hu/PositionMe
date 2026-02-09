@@ -389,7 +389,10 @@ public class TrajectoryMapFragment extends Fragment {
                 .title("TP " + index)
                 .snippet("t=" + timestampMs));
 
-        if (m != null) testPointMarkers.add(m);
+        if (m != null) {
+            m.showInfoWindow();// ✅ 关键：默认显示“TP x”
+            testPointMarkers.add(m);
+        }
     }
 
 
