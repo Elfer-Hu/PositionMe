@@ -14,12 +14,21 @@ if (localPropertiesFile.exists()) {
 
 android {
     namespace "com.openpositioning.PositionMe"
-    compileSdk 34
+    compileSdk 35
+
+    signingConfigs {
+        release {
+            storeFile file('release-key.jks')
+            storePassword '123456'
+            keyAlias '123456'
+            keyPassword '123456'
+        }
+    }
 
     defaultConfig {
         applicationId "com.openpositioning.PositionMe"
         minSdk 28
-        targetSdk 34
+        targetSdk 35
         versionCode 1
         versionName "1.0"
 
@@ -46,6 +55,7 @@ android {
 
     buildTypes {
         release {
+            signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
