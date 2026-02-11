@@ -46,6 +46,7 @@ message Trajectory {
   SensorInfo proximity_info = 25;
 
   repeated GNSSPosition test_points = 26;
+  repeated BleRTTReading ble_rtt_data = 27;
 
 }
 
@@ -163,6 +164,20 @@ message WiFiRTTReading {
   float distance_std = 4;
   // rssi integer in dBm. 
   // typically between -120 and -10
+  int32 rssi = 5;
+}
+
+message BleRTTReading {
+  int64 relative_timestamp = 1;
+
+  // Integer encoding of the BLE MAC address
+  int64 mac = 2;
+
+  // in mm
+  float distance = 3;
+  // in mm
+  float distance_std = 4;
+  // rssi integer in dBm.
   int32 rssi = 5;
 }
 

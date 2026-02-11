@@ -29,6 +29,9 @@ import com.openpositioning.PositionMe.presentation.fragment.FilesFragment;
 import com.openpositioning.PositionMe.presentation.activity.MainActivity;
 import com.openpositioning.PositionMe.sensors.Observable;
 import com.openpositioning.PositionMe.sensors.Observer;
+import com.openpositioning.PositionMe.utils.BuildingPolygon;
+
+import com.google.android.gms.maps.model.LatLng;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -87,9 +90,7 @@ public class ServerCommunications implements Observable {
     // Static constants necessary for communications
     private static final String userKey = BuildConfig.OPENPOSITIONING_API_KEY;
     private static final String masterKey = BuildConfig.OPENPOSITIONING_MASTER_KEY;
-    private static final String uploadURL =
-            "https://openpositioning.org/api/live/trajectory/upload/" + userKey
-                    + "/?key=" + masterKey;
+    private static final String DEFAULT_CAMPAIGN = "nucleus_building";
     private static final String downloadURL =
             "https://openpositioning.org/api/live/trajectory/download/" + userKey
                     + "?skip=0&limit=30&key=" + masterKey;
@@ -100,6 +101,59 @@ public class ServerCommunications implements Observable {
     private static final String PROTOCOL_ACCEPT_TYPE = "application/json";
 
 
+
+    // Mapping from API building names to valid server campaign values.
+    // Only "nucleus_building" and "murchison_house" are accepted by the server.
+    private static final Map<String, String> BUILDING_TO_CAMPAIGN = new HashMap<>();
+    static {
+        BUILDING_TO_CAMPAIGN.put("nucleus_building", "nucleus_building");
+        BUILDING_TO_CAMPAIGN.put("murchison_house", "murchison_house");
+        // Library has no dedicated campaign on the server; mapped to default
+        BUILDING_TO_CAMPAIGN.put("library", DEFAULT_CAMPAIGN);
+    }
+
+    /**
+     * Maps an API building name to a valid server campaign value.
+     *
+     * @param buildingId the building name as returned by the floorplan API
+     * @return a valid campaign string for the upload URL
+     */
+    private static String mapBuildingToCampaign(String buildingId) {
+        if (buildingId == null) return DEFAULT_CAMPAIGN;
+        String campaign = BUILDING_TO_CAMPAIGN.get(buildingId);
+        return campaign != null ? campaign : DEFAULT_CAMPAIGN;
+    }
+
+    /**
+     * Determines the campaign name based on the given latitude and longitude.
+     * Uses {@link BuildingPolygon} to check which building the coordinates fall in.
+     *
+     * @param lat latitude of the trajectory start position
+     * @param lon longitude of the trajectory start position
+     * @return campaign name string, defaults to {@link #DEFAULT_CAMPAIGN} if no building matched
+     */
+    private static String determineCampaign(double lat, double lon) {
+        LatLng point = new LatLng(lat, lon);
+        if (BuildingPolygon.inNucleus(point)) {
+            return "nucleus_building";
+        } else if (BuildingPolygon.inMurchison(point)) {
+            return "murchison_house";
+        } else if (BuildingPolygon.inLibrary(point)) {
+            return DEFAULT_CAMPAIGN;
+        }
+        return DEFAULT_CAMPAIGN;
+    }
+
+    /**
+     * Builds the upload URL with the given campaign name.
+     *
+     * @param campaign the campaign name (e.g. "nucleus_building")
+     * @return the full upload URL
+     */
+    private static String buildUploadURL(String campaign) {
+        return "https://openpositioning.org/api/live/trajectory/upload/"
+                + campaign + "/" + userKey + "/?key=" + masterKey;
+    }
 
     /**
      * Public default constructor of {@link ServerCommunications}. The constructor saves context,
@@ -124,10 +178,25 @@ public class ServerCommunications implements Observable {
      * trajectory is passed to the method. It is processed into the right format for sending
      * to the API server.
      *
-     * @param trajectory    Traj object matching all the timing and formal restrictions.
+     * @param trajectory          Traj object matching all the timing and formal restrictions.
+     * @param selectedBuildingId  user-selected building name (e.g. "nucleus_building"), or null
      */
-    public void sendTrajectory(Traj.Trajectory trajectory){
+    public void sendTrajectory(Traj.Trajectory trajectory, String selectedBuildingId){
 
+        // Determine campaign: prioritize user-selected building over coordinate-based detection
+        String campaign;
+        if (selectedBuildingId != null && !selectedBuildingId.isEmpty()) {
+            campaign = mapBuildingToCampaign(selectedBuildingId);
+        } else if (trajectory.hasInitialPosition()) {
+            campaign = determineCampaign(
+                    trajectory.getInitialPosition().getLatitude(),
+                    trajectory.getInitialPosition().getLongitude());
+        } else {
+            campaign = DEFAULT_CAMPAIGN;
+        }
+        String uploadURL = buildUploadURL(campaign);
+
+        Log.e("UPLOAD", "campaign=" + campaign);
         Log.e("UPLOAD", "uploadURL=" + uploadURL);
         Log.e("UPLOAD", "userKeyLen=" + (userKey == null ? -1 : userKey.length()));
         Log.e("UPLOAD", "masterKeyLen=" + (masterKey == null ? -1 : masterKey.length()));
@@ -288,6 +357,22 @@ public class ServerCommunications implements Observable {
      * @param localTrajectory the File object of the local trajectory to be uploaded
      */
     public void uploadLocalTrajectory(File localTrajectory) {
+
+        // Parse protobuf to determine campaign from initial position
+        String campaign = DEFAULT_CAMPAIGN;
+        try {
+            byte[] fileBytes = Files.readAllBytes(localTrajectory.toPath());
+            Traj.Trajectory parsed = Traj.Trajectory.parseFrom(fileBytes);
+            if (parsed.hasInitialPosition()) {
+                campaign = determineCampaign(
+                        parsed.getInitialPosition().getLatitude(),
+                        parsed.getInitialPosition().getLongitude());
+            }
+        } catch (IOException e) {
+            Log.w("UPLOAD", "Could not parse trajectory for campaign detection, using default", e);
+        }
+        String uploadURL = buildUploadURL(campaign);
+        Log.e("UPLOAD", "Local upload campaign=" + campaign + " url=" + uploadURL);
 
         // Instantiate client for HTTP requests
         OkHttpClient client = new OkHttpClient();
@@ -636,23 +721,20 @@ public class ServerCommunications implements Observable {
 
 
     private void logDataSize(Traj.Trajectory trajectory) {
-        Log.i("ServerCommunications", "IMU Data size: " + trajectory.getImuDataCount());
-        //Log.i("ServerCommunications", "Position Data size: " + trajectory.getPositionDataCount());
-        Log.i("ServerCommunications", "Pressure Data size: " + trajectory.getPressureDataCount());
-        Log.i("ServerCommunications", "Light Data size: " + trajectory.getLightDataCount());
-        Log.i("ServerCommunications", "GNSS Data size: " + trajectory.getGnssDataCount());
-        //Log.i("ServerCommunications", "WiFi Data size: " + trajectory.getWifiDataCount());
-        Log.i("ServerCommunications", "APS Data size: " + trajectory.getApsDataCount());
-        Log.i("ServerCommunications", "PDR Data size: " + trajectory.getPdrDataCount());
-        Log.i("ServerCommunications", "IMU Data size: " + trajectory.getImuDataCount());
-        Log.i("ServerCommunications", "PDR Data size: " + trajectory.getPdrDataCount());
-        Log.i("ServerCommunications", "Mag Data size: " + trajectory.getMagnetometerDataCount());
-        Log.i("ServerCommunications", "Pressure Data size: " + trajectory.getPressureDataCount());
-        Log.i("ServerCommunications", "Light Data size: " + trajectory.getLightDataCount());
-        Log.i("ServerCommunications", "GNSS Data size: " + trajectory.getGnssDataCount());
-        Log.i("ServerCommunications", "WiFi fingerprints size: " + trajectory.getWifiFingerprintsCount());
-        Log.i("ServerCommunications", "APS Data size: " + trajectory.getApsDataCount());
-
+        String tag = "ServerCommunications";
+        Log.i(tag, "IMU Data size: " + trajectory.getImuDataCount());
+        Log.i(tag, "Magnetometer Data size: " + trajectory.getMagnetometerDataCount());
+        Log.i(tag, "Pressure Data size: " + trajectory.getPressureDataCount());
+        Log.i(tag, "Light Data size: " + trajectory.getLightDataCount());
+        Log.i(tag, "Proximity Data size: " + trajectory.getProximityDataCount());
+        Log.i(tag, "PDR Data size: " + trajectory.getPdrDataCount());
+        Log.i(tag, "GNSS Data size: " + trajectory.getGnssDataCount());
+        Log.i(tag, "WiFi fingerprints size: " + trajectory.getWifiFingerprintsCount());
+        Log.i(tag, "APS Data size: " + trajectory.getApsDataCount());
+        Log.i(tag, "WiFi RTT Data size: " + trajectory.getWifiRttDataCount());
+        Log.i(tag, "BLE fingerprints size: " + trajectory.getBleFingerprintsCount());
+        Log.i(tag, "BLE Data size: " + trajectory.getBleDataCount());
+        Log.i(tag, "Test points size: " + trajectory.getTestPointsCount());
     }
 
     /**

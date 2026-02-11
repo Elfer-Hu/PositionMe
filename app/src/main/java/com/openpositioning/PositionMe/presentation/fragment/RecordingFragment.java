@@ -221,10 +221,10 @@ public class RecordingFragment extends Fragment {
     }
 
     private void onAddTestPoint() {
-        // 1) 确保地图 Fragment 已经就绪
+        // 1) Ensure the map fragment is ready
         if (trajectoryMapFragment == null) return;
 
-        // 2) 取当前轨迹/当前位置（必须落在轨迹上）
+        // 2) Read current track position (must lie on the current path)
         LatLng cur = trajectoryMapFragment.getCurrentLocation();
         if (cur == null) {
             Toast.makeText(requireContext(), "" +
@@ -233,17 +233,17 @@ public class RecordingFragment extends Fragment {
             return;
         }
 
-        // 3) 生成编号 + 时间戳（满足“save timestamp”要求）
+        // 3) Generate index + timestamp (satisfies "save timestamp")
         int idx = ++testPointIndex;
         long ts = System.currentTimeMillis();
 
-        // 4) 本地保存（后面写入 protobuf 会用）
+        // 4) Keep a local copy for in-session tracking
         testPoints.add(new TestPoint(idx, ts, cur.latitude, cur.longitude));
 
-        // ✅ 新增：写入 protobuf
+        // Write test point into protobuf payload
         sensorFusion.addTestPointToProto(ts, cur.latitude, cur.longitude);
 
-        // 5) 地图上画编号 marker（满足“leave numbered marker”要求）
+        // 5) Draw numbered marker on map (satisfies "leave numbered marker")
         trajectoryMapFragment.addTestPointMarker(idx, ts, cur);
     }
 
